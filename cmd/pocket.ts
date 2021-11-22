@@ -35,11 +35,12 @@ const pocketImport = async () => {
   let successfulRelays = 0;
   let revenue = 0;
   let fluxQuery = "";
+  let totalRevenue = 0;
 
   const revenueBlockchains = `["0001","0003","0004","0005","000A","0006","0007","0009","000B","0010","0021","0022","0023","0024","0025","0026","0027","000C","0028", "0040"]`;
 
   // const project = await getProject(coin.name);
-  const lastId = "1634270400";
+  const lastId = "1636157170";
   const parsedId = parseInt(lastId);
 
   if (isNaN(parsedId)) {
@@ -58,8 +59,6 @@ const pocketImport = async () => {
     formatDate(toDate)
   );
 
-  let totalRevenue = 0;
-
   for (const day of days) {
     const dayISO = formatDate(day); // YYYY-MM-DD
 
@@ -67,7 +66,7 @@ const pocketImport = async () => {
       // If data was last updated was more than a day ago,
       // we need to fetch all relays for the past days.
       fluxQuery = `
-        from(bucket: "mainnetRelayApp1d")
+        from(bucket: "mainnetRelayApp60m")
         |> range(start: ${dayISO}T00:00:00Z, stop: ${dayISO}T23:59:59Z)
           |> filter(fn: (r) =>
             r._measurement == "relay" and
@@ -120,27 +119,25 @@ const pocketImport = async () => {
       )} USD.`
     );
 
-    // const dateUnixTimestamp = day.getTime() / 1000;
-
     totalRevenue += revenue;
 
-    // const fee = {
-    //   date: dateUnixTimestamp,
-    //   fees: revenue,
-    // };
+    const dateUnixTimestamp = day.getTime() / 1000;
+
+    totalRevenue += revenue;
 
     // await storeDBData(fee, project.id);
   }
 
   console.log(
-    `Estimated revenue since October 15th: ${totalRevenue.toLocaleString(
+    `Pocket total revenue since Aug 22nd: ${totalRevenue.toLocaleString(
       "en-US",
       {
         style: "currency",
         currency: "USD",
       }
-    )} USD`
+    )} USD.`
   );
+
   console.log("Finished updating pocket revenue...");
 
   return;
