@@ -41,7 +41,7 @@ const pocketImport = async () => {
   const revenueBlockchains = `["0001","0003","0004","0005","000A","0006","0007","0009","000B","0010","0021","0022","0023","0024","0025","0026","0027","000C","0028", "0040"]`;
 
   // const project = await getProject(coin.name);
-  const lastId = "1636157170";
+  const lastId = "1629604800";
   const parsedId = parseInt(lastId);
 
   if (isNaN(parsedId)) {
@@ -102,7 +102,9 @@ const pocketImport = async () => {
     if (results.length > 0) {
       successfulRelays = countRelays(results);
     }
-    console.log(`Successful relays on ${dayISO}: ${successfulRelays}.`);
+    console.log(
+      `Successful relays on ${dayISO}: ${numberWithCommas(successfulRelays)}.`
+    );
 
     const { price: currentDayPrice } = pocketPrices.find(
       (x) => x.date === dayISO
