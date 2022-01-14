@@ -6,42 +6,39 @@ const priceEndpoint =
   "http://ec2-35-177-209-25.eu-west-2.compute.amazonaws.com/prices/pokt";
 const poktNetworkDataEndpoint = "https://poktscan.com/api/pokt-network/summary";
 
-// Pocket Network Metrics
-const { InfluxDB } = require("@influxdata/influxdb-client");
-const influxURL = "https://influx.portal.pokt.network:8086";
-const influxToken = process.env.POCKET_INFLUX_TOKEN;
-const influxOrg = "pocket";
-const influxClient = new InfluxDB({
-  url: influxURL,
-  token: influxToken,
-  timeout: 600000,
-});
-
 // .01 relays/pokt * 89% validator allocation
 const relayToPOKTRatio = 0.01 * 0.89;
 
-const queryApi = influxClient.getQueryApi(influxOrg);
-
-// const coin = {
-//   name: "pocket",
-//   symbol: "POKT",
-// };
+const coin = {
+  name: "pocket",
+  symbol: "POKT",
+};
 
 // Update Pocket Network daily revenue data
 // a cron job should hit this endpoint every hour
 const pocketImport = async () => {
   // This will fetch successfuly relays on the network for blockchains with revenue
   // and sum up the fees for the day, on an hourly basis; totalling to the day's revenue.
-  let results: any[] = [];
-  let successfulRelays = 0;
   let revenue = 0;
-  let fluxQuery = "";
-  let totalRevenue = 0;
+  let successfulRelays = 0;
 
-  const revenueBlockchains = `["0001","0003","0004","0005","000A","0006","0007","0009","000B","0010","0021","0022","0023","0024","0025","0026","0027","000C","0028", "0040"]`;
+  const project = "pocket";
 
-  // const project = await getProject(coin.name);
-  const lastId = "1629604800";
+  // Delete project if delete: true
+  // const deleteProject = project.delete;
+  // if (deleteProject) {
+  //   await prisma.project.update({
+  //     where: {
+  //       name: coin.name,
+  //     },
+  //     data: {
+  //       delete: false,
+  //       lastImportedId: "0",
+  //     },
+  //   });
+  // }
+
+  const lastId = "1625112000";
   const parsedId = parseInt(lastId);
 
   if (isNaN(parsedId)) {
@@ -49,66 +46,47 @@ const pocketImport = async () => {
   }
 
   const fromDate = new Date(parsedId * 1000);
-  fromDate.setUTCHours(0, 0, 0, 0);
   const toDate = new Date();
-  toDate.setUTCHours(0, 0, 0, 0);
 
   const days = dateRangeToList(fromDate, toDate);
   const dateDiff = dateDiffInDays(fromDate, toDate);
+
   const pocketPrices = await getPOKTDayPrices(
     formatDate(fromDate),
     formatDate(toDate)
   );
 
+  let timeUnitMsg = "on day";
+
   for (const day of days) {
     const dayISO = formatDate(day); // YYYY-MM-DD
+    // const dateUnixTimestamp = day.getTime() / 1000;
 
-    const { totalAppStakes, totalPOKTsupply } = await getPOKTNetworkData(day);
+    const { totalAppStakes, totalPOKTsupply, totalRelays1d, totalRelays1hr } =
+      await getPOKTNetworkData(day);
 
-    if (dateDiff >= 1) {
+    if (dateDiff < 1) {
       // If data was last updated was more than a day ago,
       // we need to fetch all relays for the past days.
-      fluxQuery = `
-        from(bucket: "mainnetRelayApp60m")
-        |> range(start: ${dayISO}T00:00:00Z, stop: ${dayISO}T23:59:59Z)
-          |> filter(fn: (r) =>
-            r._measurement == "relay" and
-            r._field == "count" and
-            (r.method != "synccheck" and r.method != "chaincheck") and
-            contains(value: r["blockchain"], set: ${revenueBlockchains}) and
-            r.result == "200" and
-            r.nodePublicKey == "network"
-          )
-        `;
+      successfulRelays = totalRelays1hr;
+      timeUnitMsg = "in the last hour of day";
     } else {
       // If data was last updated less than a day ago,
       // we will only update with data from the past hour.
-      fluxQuery = `
-        from(bucket: "mainnetRelayApp60m")
-          |> range(start: -1h)
-          |> filter(fn: (r) =>
-            r._measurement == "relay" and
-            r._field == "count" and
-            (r.method != "synccheck" and r.method != "chaincheck") and
-            contains(value: r["blockchain"], set: ${revenueBlockchains}) and
-            r.result == "200" and
-            r.nodePublicKey == "network"
-          )
-        `;
+      successfulRelays = totalRelays1d;
     }
 
-    results = (await queryApi.collectRows(fluxQuery)) as any[];
-
-    if (results.length > 0) {
-      successfulRelays = countRelays(results);
-    }
     console.log(
-      `Successful relays on ${dayISO}: ${numberWithCommas(successfulRelays)}.`
+      `Successful relays ${timeUnitMsg} ${dayISO}: ${numberWithCommas(
+        successfulRelays
+      )}.`
     );
 
     const { price: currentDayPrice } = pocketPrices.find(
       (x) => x.date === dayISO
     );
+
+    console.log("currentDayPrice", currentDayPrice);
 
     if (successfulRelays > 0 && currentDayPrice > 0) {
       revenue =
@@ -117,7 +95,7 @@ const pocketImport = async () => {
     }
 
     console.log(
-      `Pocket estimated revenue on ${dayISO}: ${revenue.toLocaleString(
+      `pocket estimated revenue on ${dayISO}: ${revenue.toLocaleString(
         "en-US",
         {
           style: "currency",
@@ -126,24 +104,13 @@ const pocketImport = async () => {
       )} USD.`
     );
 
-    totalRevenue += revenue;
-
-    // const dateUnixTimestamp = day.getTime() / 1000;
-
-    totalRevenue += revenue;
+    // const fee = {
+    //   date: dateUnixTimestamp,
+    //   fees: revenue,
+    // };
 
     // await storeDBData(fee, project.id);
   }
-
-  console.log(
-    `Pocket total revenue since Aug 22nd: ${totalRevenue.toLocaleString(
-      "en-US",
-      {
-        style: "currency",
-        currency: "USD",
-      }
-    )} USD.`
-  );
 
   console.log("Finished updating pocket revenue...");
 
@@ -270,18 +237,29 @@ const getPOKTNetworkData = async (date: Date) => {
 
     const [data] = response;
 
-    const entry: BlockData = pickEntry(data.blocks);
+    const blocks = data.blocks as BlockData[];
+
+    const latestBlock: BlockData = filterLastBlock(blocks);
+    const lastFourBlocks: BlockData[] = filterLastFourBlocks(blocks);
+
+    const totalRelays1d = data.total_relays_completed;
+    const totalRelays1hr = lastFourBlocks.reduce(
+      (sum, block) => sum + block.total_relays_completed,
+      0
+    );
 
     return {
-      totalAppStakes: entry.apps_staked_tokens,
-      totalPOKTsupply: entry.total_supply,
+      totalAppStakes: latestBlock.apps_staked_tokens,
+      totalPOKTsupply: latestBlock.total_supply,
+      totalRelays1d,
+      totalRelays1hr,
     };
   } catch (e) {
     throw new Error(e);
   }
 };
 
-const pickEntry = (blocksData: BlockData[]) => {
+const filterLastBlock = (blocksData: BlockData[]) => {
   let maxid = 0;
   let maxObj: BlockData;
 
@@ -293,6 +271,27 @@ const pickEntry = (blocksData: BlockData[]) => {
   });
 
   return maxObj as BlockData;
+};
+
+const filterLastFourBlocks = (blocksData: BlockData[]) => {
+  let blockNumbers = [];
+  const latestBlocks = [];
+
+  blocksData.forEach(function (obj: BlockData) {
+    blockNumbers.push(obj.height);
+  });
+
+  blockNumbers = blockNumbers
+    .sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))
+    .slice(0, 4);
+
+  blocksData.forEach(function (obj: BlockData) {
+    if (blockNumbers.includes(obj.height)) {
+      latestBlocks.push(obj);
+    }
+  });
+
+  return latestBlocks;
 };
 
 const dateDiffInDays = (fromDate: Date, toDate: Date): number => {
@@ -343,16 +342,17 @@ const countRelays = (influxResponse: any): number => {
   return counter;
 };
 
-type BlockData = {
-  height: number;
-  time: string;
-  apps_staked_tokens: number;
-  total_supply: number;
-};
-
 type DayPrice = {
   date: string;
   price: number;
+};
+
+type BlockData = {
+  time: string;
+  height: number;
+  total_supply: number;
+  apps_staked_tokens: number;
+  total_relays_completed: number;
 };
 
 pocketImport()
